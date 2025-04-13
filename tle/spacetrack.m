@@ -51,7 +51,7 @@ classdef spacetrack < matlab.apps.AppBase
             try
                 app.computeStateVectors(NORADID, app.StartDatePicker.Value);
             catch ME
-                app.TLETextArea.Value = ['❌ 상호벡터 계산 오류: ', ME.message];
+                app.TLETextArea.Value = ['❌ 상태벡터 계산 오류: ', ME.message];
             end
         end
 
@@ -69,29 +69,50 @@ classdef spacetrack < matlab.apps.AppBase
             timeVec = startTime:seconds(sampleInterval):stopTime;
             nTimes = numel(timeVec);
 
-            pos = zeros(nTimes, 3);
-            vel = zeros(nTimes, 3);
+            pos_ecef = zeros(nTimes, 3);   % ECEF
+            vel_ecef = zeros(nTimes, 3);   % ECEF
 
             for i = 1:nTimes
-                [r, v] = states(sat, timeVec(i));
-                pos(i, :) = r;
-                vel(i, :) = v;
+                [r, v] = states(sat, timeVec(i));  % TEME 좌표
+                jd = juliandate(timeVec(i));
+                [r_ecef, v_ecef] = app.teme2ecef(r, v, jd);  % TEME → ECEF 변환
+                pos_ecef(i, :) = r_ecef;
+                vel_ecef(i, :) = v_ecef;
             end
 
-            % 시간 형식을 "dd mmm yyyy HH:MM:SS.FFF"로 지정
             timeStr = cellstr(datestr(timeVec', 'dd mmm yyyy HH:MM:SS.FFF'));
 
             resultTable = table( ...
                 timeStr, ...
-                pos(:,1), pos(:,2), pos(:,3), ...
-                vel(:,1), vel(:,2), vel(:,3), ...
-                'VariableNames', {'Time_UTCG', 'x_m', 'y_m', 'z_m', 'vx_mps', 'vy_mps', 'vz_mps'});
+                pos_ecef(:,1), pos_ecef(:,2), pos_ecef(:,3), ...
+                vel_ecef(:,1), vel_ecef(:,2), vel_ecef(:,3), ...
+                'VariableNames', {'Time_UTCG', ...
+                                  'ECEF_x_m', 'ECEF_y_m', 'ECEF_z_m', ...
+                                  'ECEF_vx_mps', 'ECEF_vy_mps', 'ECEF_vz_mps'});
 
             writetable(resultTable, outputCSV);
             app.TLETextArea.Value = ['✔️ "', outputCSV, '"에 저장되었습니다.'];
 
             previewTable = resultTable(1:min(10, height(resultTable)), :);
             app.UITable.Data = previewTable;
+        end
+
+        function [r_ecef, v_ecef] = teme2ecef(app, r_teme, v_teme, jd)
+            gmst = app.siderealTime(jd);  % rad
+        
+            R = [cos(gmst), sin(gmst), 0;
+                 -sin(gmst), cos(gmst), 0;
+                 0, 0, 1];
+        
+            r_ecef = (R * r_teme(:))';  % r_teme(:)는 3x1 열벡터 → 결과는 1x3
+            v_ecef = (R * v_teme(:))';
+        end
+
+        function theta = siderealTime(~, jd)
+            T = (jd - 2451545.0) / 36525.0;
+            theta_sec = 67310.54841 + (876600*3600 + 8640184.812866)*T + 0.093104*T^2 - 6.2e-6*T^3;
+            theta_sec = mod(theta_sec, 86400);
+            theta = theta_sec * (pi / 43200);  % radian
         end
     end
 
@@ -118,7 +139,8 @@ classdef spacetrack < matlab.apps.AppBase
 
             app.UITable = uitable(app.UIFigure, ...
                 'Position', [50, 160, 700, 280], ...
-                'ColumnName', {'Time', 'x [m]', 'y [m]', 'z [m]', 'vx [m/s]', 'vy [m/s]', 'vz [m/s]'});
+                'ColumnName', {'Time', 'ECEF x [m]', 'ECEF y [m]', 'ECEF z [m]', ...
+                               'ECEF vx [m/s]', 'ECEF vy [m/s]', 'ECEF vz [m/s]'});
         end
 
         function runApp(app)
