@@ -1,6 +1,6 @@
 % 데이터 파일 경로
 %stk_filename = 'GRACE-FO_2_43477_j2000.csv';
-stk_filename = 'GRACE-FO_2_43477_Fixed_Position_Velocity.csv';
+stk_filename = 'SatelliteFixed_Fixed_Position_Velocity.csv';
 
 % 파일 옵션 설정: 모든 열을 문자열로 먼저 불러오기
 opts = detectImportOptions(stk_filename);
