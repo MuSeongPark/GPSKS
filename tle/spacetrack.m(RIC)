@@ -1,0 +1,169 @@
+classdef spacetrack < matlab.apps.AppBase
+
+    properties (Access = public)
+        UIFigure           matlab.ui.Figure
+        NORADIDEditField   matlab.ui.control.EditField
+        StartDatePicker    matlab.ui.control.DatePicker
+        EndDatePicker      matlab.ui.control.DatePicker
+        SearchButton       matlab.ui.control.Button
+        TLETextArea        matlab.ui.control.TextArea
+        UITable            matlab.ui.control.Table
+    end
+
+    methods (Access = private)
+
+        function getTLEData(app)
+            NORADID = app.NORADIDEditField.Value;
+            startDate = datestr(app.StartDatePicker.Value, 'yyyy-mm-dd');
+            endDate = datestr(app.EndDatePicker.Value, 'yyyy-mm-dd');
+
+            username = 'oe9981@naver.com';
+            password = 'Gnu3127221!!!!!';
+            cookiesFile = 'cookies.txt';
+
+            loginCmd = sprintf('curl -X POST -d "identity=%s&password=%s" --cookie-jar %s https://www.space-track.org/ajaxauth/login', username, password, cookiesFile);
+            [status, loginOut] = system(loginCmd);
+            if status ~= 0
+                app.TLETextArea.Value = ['❌ 로그인 실패: ', loginOut];
+                return;
+            end
+
+            tleURL = sprintf('https://www.space-track.org/basicspacedata/query/class/tle/NORAD_CAT_ID/%s/EPOCH/%s--%s/orderby/EPOCH%%20asc/format/tle', ...
+                              NORADID, startDate, endDate);
+            tleCmd = sprintf('curl --cookie %s "%s" -o tle_data.txt', cookiesFile, tleURL);
+            [status, tleOut] = system(tleCmd);
+            if status ~= 0
+                app.TLETextArea.Value = ['❌ TLE 다운로드 실패: ', tleOut];
+                return;
+            end
+
+            try
+                fid = fopen('tle_data.txt', 'r');
+                tle_data = fread(fid, '*char')';
+                fclose(fid);
+                app.TLETextArea.Value = tle_data;
+            catch
+                app.TLETextArea.Value = '❌ TLE 파일 읽기 실패';
+                return;
+            end
+
+            try
+                app.computeStateVectors(NORADID, app.StartDatePicker.Value);
+            catch ME
+                app.TLETextArea.Value = ['❌ 상태벡터 계산 오류: ', ME.message];
+            end
+        end
+
+        function computeStateVectors(app, NORADID, startDateTime)
+            satelliteName = NORADID;
+            startTime = startDateTime;
+            duration = days(1);
+            sampleInterval = 1;
+            outputCSV = 'satellite_state_vectors_RIC.csv';
+
+            stopTime = startTime + duration;
+            sc = satelliteScenario(startTime, stopTime, sampleInterval);
+            sat = satellite(sc, 'tle_data.txt', 'Name', satelliteName, 'OrbitPropagator', 'sgp4');
+
+            timeVec = startTime:seconds(sampleInterval):stopTime;
+            nTimes = numel(timeVec);
+
+            pos_ric = zeros(nTimes, 3);   % RIC
+            vel_ric = zeros(nTimes, 3);   % RIC
+
+            for i = 1:nTimes
+                [r, v] = states(sat, timeVec(i));  % TEME
+                jd = juliandate(timeVec(i));
+                [r_ric, v_ric] = app.teme2ric(r, v, jd);  % TEME → RIC
+                pos_ric(i, :) = r_ric;
+                vel_ric(i, :) = v_ric;
+            end
+
+            timeStr = cellstr(datestr(timeVec', 'dd mmm yyyy HH:MM:SS.FFF'));
+
+            resultTable = table( ...
+                timeStr, ...
+                pos_ric(:,1), pos_ric(:,2), pos_ric(:,3), ...
+                vel_ric(:,1), vel_ric(:,2), vel_ric(:,3), ...
+                'VariableNames', {'Time_UTCG', ...
+                                  'RIC_R_m', 'RIC_C_m', 'RIC_I_m', ...
+                                  'RIC_vR_mps', 'RIC_vC_mps', 'RIC_vI_mps'});
+
+            writetable(resultTable, outputCSV);
+            app.TLETextArea.Value = ['✔️ "', outputCSV, '"에 저장되었습니다.'];
+
+            previewTable = resultTable(1:min(10, height(resultTable)), :);
+            app.UITable.Data = previewTable;
+        end
+
+        function [r_ric, v_ric] = teme2ric(app, r_teme, v_teme, jd)
+            gmst = app.siderealTime(jd);  % rad
+
+            % TEME → ECEF 회전행렬
+            R_ecef = [cos(gmst), sin(gmst), 0;
+                     -sin(gmst), cos(gmst), 0;
+                      0,         0,        1];
+
+            % ECEF 기준 위치 및 속도
+            r_ecef = R_ecef * r_teme(:);
+            v_ecef = R_ecef * v_teme(:);
+
+            % 단위 벡터 정의 (R, I, C)
+            R_hat = r_ecef / norm(r_ecef);
+            I_hat = v_ecef / norm(v_ecef);
+            C_hat = cross(R_hat, I_hat);
+            C_hat = C_hat / norm(C_hat);
+            I_hat = cross(C_hat, R_hat);  % 직교 보장
+
+            T_ric = [R_hat'; C_hat'; I_hat'];
+
+            r_ric = T_ric * r_ecef;
+            v_ric = T_ric * v_ecef;
+        end
+
+        function theta = siderealTime(~, jd)
+            T = (jd - 2451545.0) / 36525.0;
+            theta_sec = 67310.54841 + (876600*3600 + 8640184.812866)*T + 0.093104*T^2 - 6.2e-6*T^3;
+            theta_sec = mod(theta_sec, 86400);
+            theta = theta_sec * (pi / 43200);
+        end
+    end
+
+    methods (Access = public)
+
+        function createComponents(app)
+            app.UIFigure = uifigure('Position', [100, 100, 800, 600], 'Name', 'TLE Fetcher');
+
+            uilabel(app.UIFigure, 'Text', 'NORAD ID:', 'Position', [50, 540, 100, 25]);
+            app.NORADIDEditField = uieditfield(app.UIFigure, 'text', 'Position', [160, 540, 300, 25]);
+
+            uilabel(app.UIFigure, 'Text', 'Start Date:', 'Position', [50, 500, 100, 25]);
+            app.StartDatePicker = uidatepicker(app.UIFigure, 'Position', [160, 500, 300, 25]);
+
+            uilabel(app.UIFigure, 'Text', 'End Date:', 'Position', [50, 460, 100, 25]);
+            app.EndDatePicker = uidatepicker(app.UIFigure, 'Position', [160, 460, 300, 25]);
+
+            app.SearchButton = uibutton(app.UIFigure, 'push', 'Text', 'Search', ...
+                'Position', [500, 500, 100, 30], ...
+                'ButtonPushedFcn', @(btn, event) app.getTLEData());
+
+            app.TLETextArea = uitextarea(app.UIFigure, 'Position', [50, 20, 700, 120]);
+            app.TLETextArea.Value = 'Enter NORAD ID and date range, then click Search.';
+
+            app.UITable = uitable(app.UIFigure, ...
+                'Position', [50, 160, 700, 280], ...
+                'ColumnName', {'Time', 'RIC R [m]', 'RIC C [m]', 'RIC I [m]', ...
+                               'RIC vR [m/s]', 'RIC vC [m/s]', 'RIC vI [m/s]'});
+        end
+
+        function runApp(app)
+            createComponents(app);
+        end
+    end
+
+    methods (Access = public)
+        function app = spacetrack()
+            runApp(app);
+        end
+    end
+end
