@@ -58,11 +58,15 @@ classdef spacetrack < matlab.apps.AppBase
         function computeStateVectors(app, NORADID, startDateTime)
             satelliteName = NORADID;
             startTime = startDateTime;
-            duration = days(1);
-            sampleInterval = 1;
+        
+            % 사용자 입력 기반으로 궤도 전파 기간 설정
+            duration = app.EndDatePicker.Value - app.StartDatePicker.Value;
+        
+            sampleInterval = 1;  % 초 단위 간격
             outputCSV = 'satellite_state_vectors.csv';
-
+        
             stopTime = startTime + duration;
+
             sc = satelliteScenario(startTime, stopTime, sampleInterval);
             sat = satellite(sc, 'tle_data.txt', 'Name', satelliteName, 'OrbitPropagator', 'sgp4');
 
