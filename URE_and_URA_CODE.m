@@ -1,4 +1,4 @@
-% === 참값: GRACE-FO (STK 기반) ===
+% === 참값: nasa data : (STK 기반) ===
 stk_filename = 'Truth_Orbit_State_Vector.csv';
 opts = detectImportOptions(stk_filename, 'VariableNamingRule', 'preserve');
 opts = setvartype(opts, 'char');
@@ -32,7 +32,7 @@ end
 stk_unix_time = posixtime(t_utc);
 navPos = str2double(stk_data{:, 2:4});
 
-% === 예측값: TLE 전파값 ===
+% === 예측값: TLE 전파값 (matlab SPG4) ===
 nasa_filename = 'satellite_state_vectors.csv';
 opts2 = detectImportOptions(nasa_filename, 'VariableNamingRule', 'preserve');
 opts2 = setvartype(opts2, 'char');
