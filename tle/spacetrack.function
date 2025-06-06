@@ -1,7 +1,7 @@
 function fetch_and_save_TLE(NORADID, startDate, endDate)
     % 사용자 로그인 정보
-    username = 'potalout@naver.com';
-    password = 'sMs11991177!!!!';
+    username = '아이디@naver.com';
+    password = '비밀번호 입력';
     cookiesFile = 'cookies.txt';
 
     % 날짜 문자열 변환
